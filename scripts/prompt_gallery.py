@@ -8,6 +8,7 @@ import yaml
 import platform
 import subprocess as sp
 import shutil
+import json
 import tempfile
 import gradio as gr
 import csv
@@ -29,19 +30,19 @@ import modules.shared as shared
 
 if '__file__' in locals().keys():
     root_path = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-    root_path = os.path.join(root_path, "../")
+    root_path = os.path.abspath(os.path.join(root_path, os.path.pardir))
 else:
-    if platform.system() == "Windows": 
-        root_path = "./"
-    else:
-        root_path = "./"
+    root_path = os.path.abspath(shared.script_path)
 
-# OUTPATH_SAMPLES = root_path + "/outputs/preview_outputs/preview/"
-# OUTPATH_GRIDS = root_path + "/outputs/preview_outputs/grid/"
-OUTPATH_SAMPLES = './extensions/prompt-gallery/assets/preview/'
-OUTPATH_GRIDS = './extensions/prompt-gallery/assets/grid/'
+try:
+    with open("./extensions/prompt_gallery_name.json") as fd:
+        extension_name = json.load(fd)['name']
+except:
+    extension_name = "Prompt Gallery"
+OUTPATH_SAMPLES = os.path.join(root_path, 'extensions', extension_name, 'assets', 'preview')
+OUTPATH_GRIDS =  os.path.join(root_path, 'extensions', extension_name, 'assets', 'grid')
 
-BATCH_SIZE = 4
+BATCH_SIZE = 2
 N_ITER = 2
 STEPS = 30
 CFG_SCALE = 11.5
@@ -51,7 +52,6 @@ SAMPLER_INDEX = 1
 RESTORE_FACE = 'true'
 TILING = 'false'
 DO_NOT_SAVE_GRID = 'false'
-SD_MODEL = '925997e9'
 
 EXCLUDED_TAGS = ['']
 global SKIP_EXISTS
@@ -247,7 +247,7 @@ def parse_yaml_dict(rawDict, tag, avatar_prompt, avatar_name, default_negative):
     # depth-first-search
     if 'value' in rawDict.keys() or 'negative' in rawDict.keys():
         if SKIP_EXISTS:
-            if os.path.exists(OUTPATH_SAMPLES + tag + '/' + avatar_name+'.png') or os.path.exists(OUTPATH_SAMPLES + tag + '\\' + 'Not-available.png'):
+            if os.path.exists(os.path.join(OUTPATH_SAMPLES, tag, avatar_name+'.png')) or os.path.exists(os.path.join(OUTPATH_SAMPLES,tag,'Not-available.png')):
                 print("Skip "+str(tag))
                 return ""
         cur = ""
@@ -271,8 +271,8 @@ def parse_yaml_dict(rawDict, tag, avatar_prompt, avatar_name, default_negative):
         if parsed_param == False:
             params = parse_param("")
         cur += params
-        cur = add_param('outpath_samples', '\"'+OUTPATH_SAMPLES + str(tag)+'\"', cur)
-        cur = add_param('outpath_grids', '\"'+OUTPATH_GRIDS + str(tag)+'\"', cur)
+        cur = add_param('outpath_samples', '\"'+os.path.join(OUTPATH_SAMPLES, str(tag), "./")+'\"', cur)
+        cur = add_param('outpath_grids', '\"'+os.path.join(OUTPATH_GRIDS, str(tag), "./")+'\"', cur)
         return cur 
     else:
         for item in rawDict.items():
@@ -296,7 +296,7 @@ def rename_preview(avatar_name):
         return
     root = OUTPATH_SAMPLES
     for folder in os.listdir(root):
-        files = os.listdir(root + folder)
+        files = os.listdir(os.path.join(root, folder))
         if 'Not-available.png' in files:
             print('Skip '+ folder + ' not available.')
             continue
@@ -306,7 +306,7 @@ def rename_preview(avatar_name):
             if each_avatar + '.png' in files:
                 files.remove(each_avatar + '.png')
         if len(files) == 1:
-            os.rename(root + folder + '/' + files[0], root + folder + '/' + avatar_name + '.png')
+            os.rename(os.path.join(root, folder, files[0]), os.path.join(root, folder, avatar_name + '.png'))
         else:
             print('There are 0 or more than 1 files in ' + folder)
 
@@ -351,7 +351,7 @@ class PromptStyle(typing.NamedTuple):
 def save_styles() -> None:
     if len(OUTPUTS.keys()) == 0:
         return
-    path = root_path + '/styles.csv'
+    path = os.path.join(root_path, 'styles.csv')
     # Write to temporary file first, so we don't nuke the file if something goes wrong
     fd, temp_path = tempfile.mkstemp(".csv")
     with os.fdopen(fd, "w", encoding="utf-8-sig", newline='') as file:
@@ -371,10 +371,10 @@ def save_styles() -> None:
 def load_prompt(file, default_negative, dropdown, skip_exist):
     global SKIP_EXISTS
     SKIP_EXISTS = skip_exist
-    if dropdown == '':
+    if dropdown == '' or file is None:
         return
     rawDict = yaml.load(file, Loader = yaml.BaseLoader)
-    default_negative = default_negative + ',' + avatar_negatives[avatar_names.index(dropdown)]
+    default_negative = default_negative + ',' + avatar_negatives[avatar_names.index(dropdown)] 
     parse_yaml_dict(rawDict, "", avatar_prompts[avatar_names.index(dropdown)], dropdown, default_negative)
     prompt_txt = ""
     keys = list(filter(lambda x: x not in EXCLUDED_TAGS, OUTPUTS.keys()))
@@ -390,8 +390,12 @@ def load_avartar(avatar_dict, customize_tags_positive):
         avatar_names.append(name)
         if 'value' in prompt.keys():
             avatar_prompts.append(customize_tags_positive + ', ' +  prompt['value'])
+        else:
+            avatar_prompts.append(customize_tags_positive + ', ' +  '')
         if 'negative' in prompt.keys():
             avatar_negatives.append(prompt['negative'])
+        else:
+            avatar_negatives.append('')
     return [gr.Dropdown.update(choices=avatar_names, value=avatar_names[0]), gr.Column.update(visible=True),  gr.Group.update(visible=True)] 
 
 def scan_outputs(avatar_name):
@@ -401,11 +405,15 @@ def scan_outputs(avatar_name):
     root = OUTPATH_SAMPLES
     global qc_dict
     qc_dict = {}
+
+    if not os.path.exists(root):
+        os.mkdir(root)
+
     for folder in os.listdir(root):
-        if os.path.isdir(root + folder) == False:
+        if os.path.isdir(os.path.join(root, folder)) == False:
             continue
             
-        files = os.listdir(root + folder)
+        files = os.listdir(os.path.join(root, folder))
         if 'Not-available.png' in files:
             print('Skip '+ folder + ' not available.')
             continue
@@ -416,7 +424,7 @@ def scan_outputs(avatar_name):
                 files.remove(each_avatar + '.png')
         if len(files) == 0:
             continue
-        qc_dict[folder] = [root + folder + '/' + file for file in files]
+        qc_dict[folder] = [os.path.join(root, folder, file) for file in files]
 
     if len(qc_dict.keys()) == 0:
         return gr.Dropdown.update(choices=[])
@@ -425,8 +433,8 @@ def scan_outputs(avatar_name):
 def update_gallery(dropdown, avatar):
     root = OUTPATH_SAMPLES
     global trg_img, current_folder
-    current_folder = root + dropdown
-    trg_img = root + dropdown + '/' + avatar + '.png'
+    current_folder = os.path.join(root, dropdown)
+    trg_img = os.path.join(root, dropdown, avatar + '.png')
     return qc_dict[dropdown]
 
 def clean_select_picture(filename):
@@ -439,10 +447,10 @@ def clean_select_picture(filename):
             if each_avatar + '.png' == file:
                 is_avatar = True
                 break
-        if os.path.splitext(file)[0] in filename:
-            os.rename(current_folder+'/'+file, trg_img)
+        if '-' in file and file.split('-')[1] in filename:
+            os.rename(os.path.join(current_folder, file), trg_img)
         elif is_avatar == False:
-            os.remove(current_folder+'/'+file)
+            os.remove(os.path.join(current_folder, file))
 
 def image_url(filedata):
     if type(filedata) == dict and filedata["is_file"]:
@@ -469,7 +477,12 @@ def image_url(filedata):
     return image
 
 
-            
+def dropdown_change():
+    global OUTPUTS, OUTPUTS_DICT
+    default_negative = []
+    OUTPUTS = {}
+    OUTPUTS_DICT = []
+    return [ gr.File.update(value=None), gr.Textbox.update(value=None)]   
                     
 
 class Script(scripts.Script):
@@ -525,6 +538,7 @@ class Script(scripts.Script):
                     outputs=[selected_img],
         )
             # qc_select.click(fn=select_picture, inputs=[dropdown, preview_dropdown, preview_gallery], outputs=[])
+        dropdown.change(fn=dropdown_change, inputs=[], outputs=[prompt_dict, prompt_display])
         rename_button.click(fn=rename_preview, inputs=[dropdown], outputs=[])
             # qc_select.click(fn=scan_outputs, inputs=[], outputs=[preview_dropdown])
 
