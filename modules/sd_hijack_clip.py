@@ -5,7 +5,6 @@ import torch
 from modules import prompt_parser, devices
 from modules.shared import opts
 
-
 def get_target_prompt_token_count(token_count):
     return math.ceil(max(token_count, 1) / 75) * 75
 
@@ -254,10 +253,13 @@ class FrozenCLIPEmbedderWithCustomWords(FrozenCLIPEmbedderWithCustomWordsBase):
     def __init__(self, wrapped, hijack):
         super().__init__(wrapped, hijack)
         self.tokenizer = wrapped.tokenizer
-        self.comma_token = [v for k, v in self.tokenizer.get_vocab().items() if k == ',</w>'][0]
+
+        vocab = self.tokenizer.get_vocab()
+
+        self.comma_token = vocab.get(',</w>', None)
 
         self.token_mults = {}
-        tokens_with_parens = [(k, v) for k, v in self.tokenizer.get_vocab().items() if '(' in k or ')' in k or '[' in k or ']' in k]
+        tokens_with_parens = [(k, v) for k, v in vocab.items() if '(' in k or ')' in k or '[' in k or ']' in k]
         for text, ident in tokens_with_parens:
             mult = 1.0
             for c in text:
