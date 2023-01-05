@@ -9,19 +9,11 @@ function dropReplaceImage( imgWrap, files ) {
         return;
     }
 
-    const tmpFile = files[0];
-
     imgWrap.querySelector('.modify-upload button + button, .touch-none + div button + button')?.click();
     const callback = () => {
         const fileInput = imgWrap.querySelector('input[type="file"]');
         if ( fileInput ) {
-            if ( files.length === 0 ) {
-                files = new DataTransfer();
-                files.items.add(tmpFile);
-                fileInput.files = files.files;
-            } else {
-                fileInput.files = files;
-            }
+            fileInput.files = files;
             fileInput.dispatchEvent(new Event('change'));   
         }
     };

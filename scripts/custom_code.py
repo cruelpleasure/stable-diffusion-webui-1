@@ -9,11 +9,12 @@ class Script(scripts.Script):
     def title(self):
         return "Custom code"
 
+
     def show(self, is_img2img):
         return cmd_opts.allow_code
 
     def ui(self, is_img2img):
-        code = gr.Textbox(label="Python code", lines=1, elem_id=self.elem_id("code"))
+        code = gr.Textbox(label="Python code", lines=1)
 
         return [code]
 

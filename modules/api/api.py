@@ -1,25 +1,24 @@
 import base64
 import io
 import time
-import datetime
 import uvicorn
 from threading import Lock
 from io import BytesIO
 from gradio.processing_utils import decode_base64_to_file
-from fastapi import APIRouter, Depends, FastAPI, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, FastAPI, HTTPException
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from secrets import compare_digest
 
 import modules.shared as shared
-from modules import sd_samplers, deepbooru, sd_hijack, images
+from modules import sd_samplers, deepbooru, sd_hijack
 from modules.api.models import *
 from modules.processing import StableDiffusionProcessingTxt2Img, StableDiffusionProcessingImg2Img, process_images
-from modules.extras import run_extras
+from modules.extras import run_extras, run_pnginfo
 from modules.textual_inversion.textual_inversion import create_embedding, train_embedding
 from modules.textual_inversion.preprocess import preprocess
 from modules.hypernetworks.hypernetwork import create_hypernetwork, train_hypernetwork
 from PIL import PngImagePlugin,Image
-from modules.sd_models import checkpoints_list, find_checkpoint_config
+from modules.sd_models import checkpoints_list
 from modules.realesrgan_model import get_realesrgan_models
 from modules import devices
 from typing import List
@@ -68,27 +67,6 @@ def encode_pil_to_base64(image):
         bytes_data = output_bytes.getvalue()
     return base64.b64encode(bytes_data)
 
-def api_middleware(app: FastAPI):
-    @app.middleware("http")
-    async def log_and_time(req: Request, call_next):
-        ts = time.time()
-        res: Response = await call_next(req)
-        duration = str(round(time.time() - ts, 4))
-        res.headers["X-Process-Time"] = duration
-        endpoint = req.scope.get('path', 'err')
-        if shared.cmd_opts.api_log and endpoint.startswith('/sdapi'):
-            print('API {t} {code} {prot}/{ver} {method} {endpoint} {cli} {duration}'.format(
-                t = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f"),
-                code = res.status_code,
-                ver = req.scope.get('http_version', '0.0'),
-                cli = req.scope.get('client', ('0:0.0.0', 0))[0],
-                prot = req.scope.get('scheme', 'err'),
-                method = req.scope.get('method', 'err'),
-                endpoint = endpoint,
-                duration = duration,
-            ))
-        return res
-
 
 class Api:
     def __init__(self, app: FastAPI, queue_lock: Lock):
@@ -101,7 +79,6 @@ class Api:
         self.router = APIRouter()
         self.app = app
         self.queue_lock = queue_lock
-        api_middleware(self.app)
         self.add_api_route("/sdapi/v1/txt2img", self.text2imgapi, methods=["POST"], response_model=TextToImageResponse)
         self.add_api_route("/sdapi/v1/img2img", self.img2imgapi, methods=["POST"], response_model=ImageToImageResponse)
         self.add_api_route("/sdapi/v1/extra-single-image", self.extras_single_image_api, methods=["POST"], response_model=ExtrasSingleImageResponse)
@@ -123,7 +100,6 @@ class Api:
         self.add_api_route("/sdapi/v1/prompt-styles", self.get_prompt_styles, methods=["GET"], response_model=List[PromptStyleItem])
         self.add_api_route("/sdapi/v1/artist-categories", self.get_artists_categories, methods=["GET"], response_model=List[str])
         self.add_api_route("/sdapi/v1/artists", self.get_artists, methods=["GET"], response_model=List[ArtistItem])
-        self.add_api_route("/sdapi/v1/embeddings", self.get_embeddings, methods=["GET"], response_model=EmbeddingsResponse)
         self.add_api_route("/sdapi/v1/refresh-checkpoints", self.refresh_checkpoints, methods=["POST"])
         self.add_api_route("/sdapi/v1/create/embedding", self.create_embedding, methods=["POST"], response_model=CreateResponse)
         self.add_api_route("/sdapi/v1/create/hypernetwork", self.create_hypernetwork, methods=["POST"], response_model=CreateResponse)
@@ -233,17 +209,9 @@ class Api:
         if(not req.image.strip()):
             return PNGInfoResponse(info="")
 
-        image = decode_base64_to_image(req.image.strip())
-        if image is None:
-            return PNGInfoResponse(info="")
+        result = run_pnginfo(decode_base64_to_image(req.image.strip()))
 
-        geninfo, items = images.read_info_from_image(image)
-        if geninfo is None:
-            geninfo = ""
-
-        items = {**{'parameters': geninfo}, **items}
-
-        return PNGInfoResponse(info=geninfo, items=items)
+        return PNGInfoResponse(info=result[1])
 
     def progressapi(self, req: ProgressRequest = Depends()):
         # copy from check_progress_call of ui.py
@@ -334,7 +302,7 @@ class Api:
         return upscalers
 
     def get_sd_models(self):
-        return [{"title":x.title, "model_name":x.model_name, "hash":x.hash, "filename": x.filename, "config": find_checkpoint_config(x)} for x in checkpoints_list.values()]
+        return [{"title":x.title, "model_name":x.model_name, "hash":x.hash, "filename": x.filename, "config": x.config} for x in checkpoints_list.values()]
 
     def get_hypernetworks(self):
         return [{"name": name, "path": shared.hypernetworks[name]} for name in shared.hypernetworks]
@@ -358,26 +326,6 @@ class Api:
 
     def get_artists(self):
         return [{"name":x[0], "score":x[1], "category":x[2]} for x in shared.artist_db.artists]
-
-    def get_embeddings(self):
-        db = sd_hijack.model_hijack.embedding_db
-
-        def convert_embedding(embedding):
-            return {
-                "step": embedding.step,
-                "sd_checkpoint": embedding.sd_checkpoint,
-                "sd_checkpoint_name": embedding.sd_checkpoint_name,
-                "shape": embedding.shape,
-                "vectors": embedding.vectors,
-            }
-
-        def convert_embeddings(embeddings):
-            return {embedding.name: convert_embedding(embedding) for embedding in embeddings.values()}
-
-        return {
-            "loaded": convert_embeddings(db.word_embeddings),
-            "skipped": convert_embeddings(db.skipped_embeddings),
-        }
 
     def refresh_checkpoints(self):
         shared.refresh_checkpoints()
