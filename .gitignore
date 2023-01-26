@@ -32,5 +32,4 @@ notification.mp3
 /extensions
 /test/stdout.txt
 /test/stderr.txt
-scripts/StylePile_cp/
-ffmpeg/
+/cache.json
