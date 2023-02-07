@@ -123,7 +123,7 @@ def apply_vae(p, x, xs):
 
 
 def apply_styles(p: StableDiffusionProcessingTxt2Img, x: str, _):
-    p.styles = x.split(',')
+    p.styles.extend(x.split(','))
 
 
 def format_value_add_label(p, opt, x):
@@ -205,7 +205,7 @@ axis_options = [
 ]
 
 
-def draw_xyz_grid(p, xs, ys, zs, x_labels, y_labels, z_labels, cell, draw_legend, include_lone_images, include_sub_grids, first_axes_processed, second_axes_processed):
+def draw_xyz_grid(p, xs, ys, zs, x_labels, y_labels, z_labels, cell, draw_legend, include_lone_images, include_sub_grids, first_axes_processed, second_axes_processed, margin_size):
     hor_texts = [[images.GridAnnotation(x)] for x in x_labels]
     ver_texts = [[images.GridAnnotation(y)] for y in y_labels]
     title_texts = [[images.GridAnnotation(z)] for z in z_labels]
@@ -286,23 +286,24 @@ def draw_xyz_grid(p, xs, ys, zs, x_labels, y_labels, z_labels, cell, draw_legend
         print("Unexpected error: draw_xyz_grid failed to return even a single processed image")
         return Processed(p, [])
 
-    grids = [None] * len(zs)
+    sub_grids = [None] * len(zs)
     for i in range(len(zs)):
         start_index = i * len(xs) * len(ys)
         end_index = start_index + len(xs) * len(ys)
         grid = images.image_grid(image_cache[start_index:end_index], rows=len(ys))
         if draw_legend:
-            grid = images.draw_grid_annotations(grid, cell_size[0], cell_size[1], hor_texts, ver_texts)
-        
-        grids[i] = grid        
+            grid = images.draw_grid_annotations(grid, cell_size[0], cell_size[1], hor_texts, ver_texts, margin_size)
+        sub_grids[i] = grid
         if include_sub_grids and len(zs) > 1:
             processed_result.images.insert(i+1, grid)
 
-    original_grid_size = grids[0].size
-    grids = images.image_grid(grids, rows=1)
-    processed_result.images[0] = images.draw_grid_annotations(grids, original_grid_size[0], original_grid_size[1], title_texts, [[images.GridAnnotation()]])
+    sub_grid_size = sub_grids[0].size
+    z_grid = images.image_grid(sub_grids, rows=1)
+    if draw_legend:
+        z_grid = images.draw_grid_annotations(z_grid, sub_grid_size[0], sub_grid_size[1], title_texts, [[images.GridAnnotation()]])
+    processed_result.images[0] = z_grid
 
-    return processed_result
+    return processed_result, sub_grids
 
 
 class SharedSettingsStackHelper(object):
@@ -350,10 +351,16 @@ class Script(scripts.Script):
                     fill_z_button = ToolButton(value=fill_values_symbol, elem_id="xyz_grid_fill_z_tool_button", visible=False)
 
         with gr.Row(variant="compact", elem_id="axis_options"):
-            draw_legend = gr.Checkbox(label='Draw legend', value=True, elem_id=self.elem_id("draw_legend"))
-            include_lone_images = gr.Checkbox(label='Include Sub Images', value=False, elem_id=self.elem_id("include_lone_images"))
-            include_sub_grids = gr.Checkbox(label='Include Sub Grids', value=False, elem_id=self.elem_id("include_sub_grids"))
-            no_fixed_seeds = gr.Checkbox(label='Keep -1 for seeds', value=False, elem_id=self.elem_id("no_fixed_seeds"))
+            with gr.Column():
+                draw_legend = gr.Checkbox(label='Draw legend', value=True, elem_id=self.elem_id("draw_legend"))
+                no_fixed_seeds = gr.Checkbox(label='Keep -1 for seeds', value=False, elem_id=self.elem_id("no_fixed_seeds"))
+            with gr.Column():
+                include_lone_images = gr.Checkbox(label='Include Sub Images', value=False, elem_id=self.elem_id("include_lone_images"))
+                include_sub_grids = gr.Checkbox(label='Include Sub Grids', value=False, elem_id=self.elem_id("include_sub_grids"))
+            with gr.Column():
+                margin_size = gr.Slider(label="Grid margins (px)", min=0, max=500, value=0, step=2, elem_id=self.elem_id("margin_size"))
+        
+        with gr.Row(variant="compact", elem_id="swap_axes"):
             swap_xy_axes_button = gr.Button(value="Swap X/Y axes", elem_id="xy_grid_swap_axes_button")
             swap_yz_axes_button = gr.Button(value="Swap Y/Z axes", elem_id="yz_grid_swap_axes_button")
             swap_xz_axes_button = gr.Button(value="Swap X/Z axes", elem_id="xz_grid_swap_axes_button")
@@ -383,9 +390,18 @@ class Script(scripts.Script):
         y_type.change(fn=select_axis, inputs=[y_type], outputs=[fill_y_button])
         z_type.change(fn=select_axis, inputs=[z_type], outputs=[fill_z_button])
 
-        return [x_type, x_values, y_type, y_values, z_type, z_values, draw_legend, include_lone_images, include_sub_grids, no_fixed_seeds]
+        self.infotext_fields = (
+            (x_type, "X Type"),
+            (x_values, "X Values"),
+            (y_type, "Y Type"),
+            (y_values, "Y Values"),
+            (z_type, "Z Type"),
+            (z_values, "Z Values"),
+        )
 
-    def run(self, p, x_type, x_values, y_type, y_values, z_type, z_values, draw_legend, include_lone_images, include_sub_grids, no_fixed_seeds):
+        return [x_type, x_values, y_type, y_values, z_type, z_values, draw_legend, include_lone_images, include_sub_grids, no_fixed_seeds, margin_size]
+
+    def run(self, p, x_type, x_values, y_type, y_values, z_type, z_values, draw_legend, include_lone_images, include_sub_grids, no_fixed_seeds, margin_size):
         if not no_fixed_seeds:
             modules.processing.fix_seed(p)
 
@@ -499,7 +515,7 @@ class Script(scripts.Script):
         image_cell_count = p.n_iter * p.batch_size
         cell_console_text = f"; {image_cell_count} images per cell" if image_cell_count > 1 else ""
         plural_s = 's' if len(zs) > 1 else ''
-        print(f"X/Y plot will create {len(xs) * len(ys) * len(zs) * image_cell_count} images on {len(zs)} {len(xs)}x{len(ys)} grid{plural_s}{cell_console_text}. (Total steps to process: {total_steps})")
+        print(f"X/Y/Z plot will create {len(xs) * len(ys) * len(zs) * image_cell_count} images on {len(zs)} {len(xs)}x{len(ys)} grid{plural_s}{cell_console_text}. (Total steps to process: {total_steps})")
         shared.total_tqdm.updateTotal(total_steps)
 
         grid_infotext = [None]
@@ -533,6 +549,7 @@ class Script(scripts.Script):
                 return Processed(p, [], p.seed, "")
 
             pc = copy(p)
+            pc.styles = pc.styles[:]
             x_opt.apply(pc, x, xs)
             y_opt.apply(pc, y, ys)
             z_opt.apply(pc, z, zs)
@@ -541,6 +558,7 @@ class Script(scripts.Script):
 
             if grid_infotext[0] is None:
                 pc.extra_generation_params = copy(pc.extra_generation_params)
+                pc.extra_generation_params['Script'] = self.title()
 
                 if x_opt.label != 'Nothing':
                     pc.extra_generation_params["X Type"] = x_opt.label
@@ -565,7 +583,7 @@ class Script(scripts.Script):
             return res
 
         with SharedSettingsStackHelper():
-            processed = draw_xyz_grid(
+            processed, sub_grids = draw_xyz_grid(
                 p,
                 xs=xs,
                 ys=ys,
@@ -578,8 +596,13 @@ class Script(scripts.Script):
                 include_lone_images=include_lone_images,
                 include_sub_grids=include_sub_grids,
                 first_axes_processed=first_axes_processed,
-                second_axes_processed=second_axes_processed
+                second_axes_processed=second_axes_processed,
+                margin_size=margin_size
             )
+
+        if opts.grid_save and len(sub_grids) > 1:
+            for sub_grid in sub_grids:
+                images.save_image(sub_grid, p.outpath_grids, "xyz_grid", info=grid_infotext[0], extension=opts.grid_format, prompt=p.prompt, seed=processed.seed, grid=True, p=p)
 
         if opts.grid_save:
             images.save_image(processed.images[0], p.outpath_grids, "xyz_grid", info=grid_infotext[0], extension=opts.grid_format, prompt=p.prompt, seed=processed.seed, grid=True, p=p)
