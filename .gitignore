@@ -33,3 +33,7 @@ notification.mp3
 /test/stdout.txt
 /test/stderr.txt
 /cache.json
+ffmpeg/
+scripts/prompt_gallery.py
+scripts/StylePile_cp/
+webui-user.bat

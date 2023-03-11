@@ -17,6 +17,7 @@ import base64
 import io
 from PIL import Image
 import mimetypes
+
 mimetypes.init()
 mimetypes.add_type('application/javascript', '.js')
 
@@ -34,13 +35,16 @@ if '__file__' in locals().keys():
 else:
     root_path = os.path.abspath(shared.script_path)
 
+rela_path =  os.path.join( 'extensions')
+
 try:
-    with open("./extensions/prompt_gallery_name.json") as fd:
+    with open( os.path.join( rela_path, 'prompt_gallery_name.json') ) as fd:
         extension_name = json.load(fd)['name']
 except:
     extension_name = "Prompt Gallery"
-OUTPATH_SAMPLES = os.path.join(root_path, 'extensions', extension_name, 'assets', 'preview')
-OUTPATH_GRIDS =  os.path.join(root_path, 'extensions', extension_name, 'assets', 'grid')
+
+OUTPATH_SAMPLES = os.path.join(rela_path, extension_name, 'assets', 'preview')
+OUTPATH_GRIDS =  os.path.join(rela_path, extension_name, 'assets', 'grid')
 
 BATCH_SIZE = 2
 N_ITER = 2
@@ -77,7 +81,7 @@ pg_templates = {}
 pg_templates.update(options_section_def(('saving-images', "Saving images/grids"), {
     "samples_save": OptionInfo(True, "Always save all generated images"),
     "samples_format": OptionInfo('png', 'File format for images'),
-    "samples_filename_pattern": OptionInfo("", "Images filename pattern", component_args=hide_dirs),
+    "samples_filename_pattern": OptionInfo("[seed]", "Images filename pattern", component_args=hide_dirs),
     "save_images_add_number": OptionInfo(True, "Add number to filename when saving", component_args=hide_dirs),
 
     "grid_save": OptionInfo(True, "Always save all generated image grids"),
@@ -89,9 +93,6 @@ pg_templates.update(options_section_def(('saving-images', "Saving images/grids")
 
     "enable_pnginfo": OptionInfo(True, "Save text information about generation parameters as chunks to png files"),
     "save_txt": OptionInfo(False, "Create a text file next to every image with generation parameters."),
-    "save_images_before_face_restoration": OptionInfo(False, "Save a copy of image before doing face restoration."),
-    "save_images_before_highres_fix": OptionInfo(False, "Save a copy of image before applying highres fix."),
-    "save_images_before_color_correction": OptionInfo(False, "Save a copy of image before applying color correction to img2img results"),
     "jpeg_quality": OptionInfo(80, "Quality for saved jpeg images", gr.Slider, {"minimum": 1, "maximum": 100, "step": 1}),
     "export_for_4chan": OptionInfo(True, "If PNG image is larger than 4MB or any dimension is larger than 4000, downscale and save copy as JPG"),
 
@@ -99,26 +100,20 @@ pg_templates.update(options_section_def(('saving-images', "Saving images/grids")
     "save_selected_only": OptionInfo(True, "When using 'Save' button, only save a single selected image"),
     "do_not_add_watermark": OptionInfo(False, "Do not add watermark to images"),
 
-    "temp_dir":  OptionInfo("", "Directory for temporary images; leave empty for default"),
-    "clean_temp_dir_at_start": OptionInfo(False, "Cleanup non-default temporary directory when starting webui"),
-
 }))
 
-pg_templates.update(options_section_def(('saving-paths', "Paths for saving"), {
-    "outdir_samples": OptionInfo("", "Output directory for images; if empty, defaults to three directories below", component_args=hide_dirs),
-    "outdir_txt2img_samples": OptionInfo("outputs/txt2img-images", 'Output directory for txt2img images', component_args=hide_dirs),
-    "outdir_img2img_samples": OptionInfo("outputs/img2img-images", 'Output directory for img2img images', component_args=hide_dirs),
-    "outdir_extras_samples": OptionInfo("outputs/extras-images", 'Output directory for images from extras tab', component_args=hide_dirs),
-    "outdir_grids": OptionInfo("", "Output directory for grids; if empty, defaults to two directories below", component_args=hide_dirs),
-    "outdir_txt2img_grids": OptionInfo("outputs/txt2img-grids", 'Output directory for txt2img grids', component_args=hide_dirs),
-    "outdir_img2img_grids": OptionInfo("outputs/img2img-grids", 'Output directory for img2img grids', component_args=hide_dirs),
-    "outdir_save": OptionInfo("log/images", "Directory for saving images using the Save button", component_args=hide_dirs),
-}))
+# pg_templates.update(options_section_def(('saving-paths', "Paths for saving"), {
+#     "outdir_samples": OptionInfo("", "Output directory for images; if empty, defaults to three directories below", component_args=hide_dirs),
+#     "outdir_txt2img_samples": OptionInfo("outputs/txt2img-images", 'Output directory for txt2img images', component_args=hide_dirs),
+#     "outdir_img2img_samples": OptionInfo("outputs/img2img-images", 'Output directory for img2img images', component_args=hide_dirs),
+#     "outdir_extras_samples": OptionInfo("outputs/extras-images", 'Output directory for images from extras tab', component_args=hide_dirs),
+#     "outdir_grids": OptionInfo("", "Output directory for grids; if empty, defaults to two directories below", component_args=hide_dirs),
+#     "outdir_txt2img_grids": OptionInfo("outputs/txt2img-grids", 'Output directory for txt2img grids', component_args=hide_dirs),
+#     "outdir_img2img_grids": OptionInfo("outputs/img2img-grids", 'Output directory for img2img grids', component_args=hide_dirs),
+#     "outdir_save": OptionInfo("log/images", "Directory for saving images using the Save button", component_args=hide_dirs),
+# }))
 
 pg_templates.update(options_section_def(('saving-to-dirs', "Saving to a directory"), {
-    "save_to_dirs": OptionInfo(False, "Save images to a subdirectory"),
-    "grid_save_to_dirs": OptionInfo(False, "Save grids to a subdirectory"),
-    "use_save_to_dirs_for_ui": OptionInfo(False, "When using \"Save\" button, save images to a subdirectory"),
     "directories_filename_pattern": OptionInfo("", "Directory name pattern", component_args=hide_dirs),
     "directories_max_prompt_words": OptionInfo(8, "Max prompt words for [prompt_words] pattern", gr.Slider, {"minimum": 1, "maximum": 20, "step": 1, **hide_dirs}),
 }))
@@ -137,15 +132,12 @@ pg_templates.update(options_section_def(('ui', "User interface"), {
     "show_progress_grid": OptionInfo(True, "Show previews of all images generated in a batch as a grid"),
     "return_grid": OptionInfo(True, "Show grid in results for web"),
     "do_not_show_images": OptionInfo(False, "Do not show any images in results for web"),
-    "add_model_hash_to_info": OptionInfo(True, "Add model hash to generation information"),
-    "add_model_name_to_info": OptionInfo(False, "Add model name to generation information"),
-    "disable_weights_auto_swap": OptionInfo(False, "When reading generation parameters from text into UI (from PNG info or pasted text), do not change the selected model/checkpoint."),
+    # "disable_weights_auto_swap": OptionInfo(False, "When reading generation parameters from text into UI (from PNG info or pasted text), do not change the selected model/checkpoint."),
     "send_seed": OptionInfo(True, "Send seed when sending prompt or image to other interface"),
     "font": OptionInfo("", "Font for image grids that have text"),
     "js_modal_lightbox": OptionInfo(True, "Enable full page image viewer"),
     "js_modal_lightbox_initially_zoomed": OptionInfo(True, "Show images zoomed in by default in full page image viewer"),
     "show_progress_in_title": OptionInfo(True, "Show generation progress in window title."),
-    'quicksettings': OptionInfo("sd_model_checkpoint", "Quicksettings list"),
     'localization': OptionInfo("None", "Localization (requires restart)", gr.Dropdown, lambda: {"choices": ["None"] + list(localization.localizations.keys())}, refresh=lambda: localization.list_localizations(cmd_opts.localizations_dir)),
 }))
 
@@ -242,7 +234,6 @@ def cmdargs(line):
     args = shlex.split(line)
     args[args.index('--outpath_samples')+1] = args[args.index('--outpath_samples')+1][:-1]
     args[args.index('--outpath_grids')+1] = args[args.index('--outpath_grids')+1][:-1]
-    print(args)
     pos = 0
     res = {}
 
@@ -305,7 +296,7 @@ def parse_param(param_str):
             m_steps = value
         elif key == "CFG scale":
             m_cfg_scale = value
-        elif value == 'Sampler':
+        elif key == 'Sampler':
             m_sampler_index = map_sampler_to_idx[value]
         elif key == 'Size':
             parse_size(m_width, m_height, value, cur_line)
@@ -439,7 +430,7 @@ class PromptStyle(typing.NamedTuple):
 def save_styles() -> None:
     if len(OUTPUTS.keys()) == 0:
         return
-    path = os.path.join(root_path, 'styles.csv')
+    path = os.path.join('./', 'styles.csv')
     # Write to temporary file first, so we don't nuke the file if something goes wrong
     fd, temp_path = tempfile.mkstemp(".csv")
     with os.fdopen(fd, "a", encoding="utf-8-sig", newline='') as file:
@@ -452,7 +443,7 @@ def save_styles() -> None:
         # writer.writerows(style._asdict() for k,     style in self.styles.items())
 
     # Always keep a backup file around
-    if os.path.exists(path):
+    if os.path.exists(path) and not os.path.exists(path + ".bak"):
         shutil.move(path, path + ".bak")
     shutil.move(temp_path, path)
 
@@ -512,7 +503,7 @@ def scan_outputs(avatar_name):
                 files.remove(each_avatar + '.png')
         if len(files) == 0:
             continue
-        print("Insert file:")
+        # print("Insert file:")
         for file in files:
             print(os.path.join(root, folder, file))
         qc_dict[folder] = [os.path.join(root, folder, file) for file in files]
@@ -526,12 +517,12 @@ def update_gallery(dropdown, avatar):
     global trg_img, current_folder
     current_folder = os.path.join(root, dropdown)
     trg_img = os.path.join(root, dropdown, avatar + '.png')
-    print("Detected folders:")
-    print(qc_dict)
-    print("Selected folder:")
-    print(dropdown)
-    print("Detected files:")
-    print(qc_dict[dropdown])
+    # print("Detected folders:")
+    # print(qc_dict)
+    # print("Selected folder:")
+    # print(dropdown)
+    # print("Detected files:")
+    # print(qc_dict[dropdown])
     return qc_dict[dropdown]
 
 def clean_select_picture(filename):
@@ -544,7 +535,7 @@ def clean_select_picture(filename):
             if each_avatar + '.png' == file:
                 is_avatar = True
                 break
-        if '-' in file and file.split('-')[1] in filename:
+        if '-' in file and file.split('.')[0] in filename:
             print("rename", os.path.join(current_folder, file), trg_img)
             os.rename(os.path.join(current_folder, file), trg_img)
         elif is_avatar == False:
@@ -552,6 +543,21 @@ def clean_select_picture(filename):
             os.remove(os.path.join(current_folder, file))
 
 def image_url(filedata):
+    if type(filedata) == list:
+        if len(filedata) == 0:
+            return None
+        filedata = filedata[0]
+        # for item in filedata:
+        #     if filedata["is_file"]:
+        #         filedata = item
+        #         filename = filedata["name"]
+        #         tempdir = os.path.normpath(tempfile.gettempdir())
+        #         normfn = os.path.normpath(filename)
+        #         assert normfn.startswith(tempdir), 'trying to open image file not in temporary directory'
+
+        #         image = Image.open(filename)
+        #         clean_select_picture(os.path.basename(filename))
+                # return Image.open(filename)
     if type(filedata) == dict and filedata["is_file"]:
         filename = filedata["name"]
         tempdir = os.path.normpath(tempfile.gettempdir())
@@ -562,19 +568,21 @@ def image_url(filedata):
         clean_select_picture(os.path.basename(filename))
         return Image.open(filename)
 
-    if type(filedata) == list:
-        if len(filedata) == 0:
-            return None
+    elif type(filedata) == dict:
+        print(filedata)
+        print("Dict is not file.")
+        return 
 
-        filedata = filedata[0]
 
-    if filedata.startswith("data:image/png;base64,"):
+
+    elif  type(filedata) != dict and filedata.startswith("data:image/png;base64,"):
         filedata = filedata[len("data:image/png;base64,"):]
 
-    filedata = base64.decodebytes(filedata.encode('utf-8'))
-    image = Image.open(io.BytesIO(filedata))
-    return image
-
+        filedata = base64.decodebytes(filedata.encode('utf-8'))
+        image = Image.open(io.BytesIO(filedata))
+        return image
+    return None
+        
 
 def dropdown_change():
     global OUTPUTS, OUTPUTS_DICT
@@ -647,6 +655,7 @@ class Script(scripts.Script):
     def run(self, p, checkbox_iterate, avatar_dict, prompt_dict, default_negative, default_positive, dropdown, prompt_display, rename_button, label_avatar, open_button, export_button, skip_exist, label_presets, label_preview, preview_dropdown, preview_gallery, qc_select, qc_refresh, qc_show, selected_img):
         global pg_templates
         backup = copy.deepcopy(shared.opts)
+
         shared.opts.data.update(pg_templates)
         lines = [x.strip() for x in prompt_display.splitlines()]
         lines = [x for x in lines if len(x) > 0]
@@ -675,7 +684,7 @@ class Script(scripts.Script):
 
             jobs.append(args)
 
-        print(f"Will process {len(lines)} lines in {job_count} jobs.")
+        # print(f"Will process {len(lines)} lines in {job_count} jobs.")
         if (checkbox_iterate and p.seed == -1):
             p.seed = int(random.randrange(4294967294))
 
@@ -697,5 +706,6 @@ class Script(scripts.Script):
 
         OUTPUTS = {}
         rawDict = {}
+        
         shared.opts = backup
         return Processed(p, images, p.seed, "")
